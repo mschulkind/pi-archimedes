@@ -73,6 +73,29 @@ export function resolveModel<T extends { provider: string; id: string }>(
 // ── Title generation (runs in background) ───────────────────────────────────
 
 /**
+ * Name the session, or report that it is no longer ours to name.
+ *
+ * Returns false, quietly, in two cases that are not failures: a manual name is
+ * already set (`--name` or `/name`, which must always win), or the session was
+ * replaced while the title was being generated.
+ *
+ * Pi has no liveness predicate, so the attempt IS the check: on a stale context
+ * every session-bound method throws rather than writing. Both the read and the
+ * write stay inside this one session-bound step so a replacement cannot slip
+ * between them, and the throw is the answer rather than an error worth
+ * reporting -- the title simply has nowhere to land.
+ */
+function writeSessionName(pi: ExtensionAPI, title: string): boolean {
+  try {
+    if (pi.getSessionName()) return false;
+    pi.setSessionName(title);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Generate and set a session title. Runs asynchronously without blocking
  * the agent_end handler so the UI stays responsive.
  */
@@ -192,11 +215,17 @@ async function generateTitle(
       return;
     }
 
-    // 8. Race guard — re-check before setting
-    if (pi.getSessionName()) return;
-
-    // 9. Set session name
-    pi.setSessionName(title);
+    // 8. Race guard, and the write itself, in one session-bound step.
+    //
+    // This function is detached from its `agent_end` handler on purpose -- the
+    // model call takes seconds, and the UI must not wait for it -- so it can
+    // outlive the session it started in. A newSession/fork/switchSession or
+    // /reload during that window invalidates every session-bound object, and
+    // pi's methods throw afterwards. There is no context to pick up instead:
+    // extension instances are per-session, and `withSession` hands a
+    // replacement context to the code that triggered the replacement, not to a
+    // bystander like this one.
+    if (!writeSessionName(pi, title)) return;
     onSuccess();
   } catch (e) {
     console.error("[archimedes] session-name failed:", e);

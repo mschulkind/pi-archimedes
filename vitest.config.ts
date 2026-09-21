@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     projects: [
       "packages/core",
+      "packages/session-name",
       "packages/diff",
       "packages/footer",
       "packages/subagent",
