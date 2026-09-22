@@ -10,16 +10,23 @@ export interface SessionNameSettings {
   // suite-managed by meta's plugin gate (archimedes.sessionName.enabled — see ADR 0012); session-name never reads this
   enabled?: boolean | undefined;
   model?: string | undefined;
+  /** Recompute an extension-owned title every N completed exchanges; 0 is one-shot. */
+  recomputeEvery?: number | undefined;
 }
 
 const DEFAULT_SESSION_NAME_CONFIG: SessionNameSettings = {
   model: undefined,
+  recomputeEvery: 0,
 };
 
 const NAMESPACE = "archimedes.sessionName";
 
 export function loadSessionNameConfig(): SessionNameSettings {
   return loadConfig(NAMESPACE, DEFAULT_SESSION_NAME_CONFIG);
+}
+
+function recomputeInterval(value: number | undefined): number {
+  return value !== undefined && Number.isInteger(value) && value > 0 ? value : 0;
 }
 
 // ── Model resolution ────────────────────────────────────────────────────────
@@ -39,17 +46,14 @@ function findMatch<T extends { provider: string; id: string }>(
   const lower = ref.toLowerCase();
   if (!lower) return undefined;
 
-  // 1. Canonical provider/id match
   const canonical = models.find(
     (m) => `${m.provider}/${m.id}`.toLowerCase() === lower,
   );
   if (canonical) return canonical;
 
-  // 2. Bare id match — must be unique
   const idMatches = models.filter((m) => m.id.toLowerCase() === lower);
   if (idMatches.length === 1) return idMatches[0];
 
-  // 3. Thinking-suffix tolerance: strip after last colon and retry
   if (ref.includes(":")) {
     const prefix = ref.slice(0, ref.lastIndexOf(":"));
     if (prefix) return findMatch(prefix, models);
@@ -58,10 +62,7 @@ function findMatch<T extends { provider: string; id: string }>(
   return undefined;
 }
 
-/**
- * Resolve a model reference against the available models.
- * Returns the matched model or undefined if no match found.
- */
+/** Resolve a model reference against the available models. */
 export function resolveModel<T extends { provider: string; id: string }>(
   modelRef: string | undefined,
   models: readonly T[],
@@ -73,92 +74,50 @@ export function resolveModel<T extends { provider: string; id: string }>(
 // ── Title generation (runs in background) ───────────────────────────────────
 
 /**
- * Name the session, or report that it is no longer ours to name.
- *
- * Returns false, quietly, in two cases that are not failures: a manual name is
- * already set (`--name` or `/name`, which must always win), or the session was
- * replaced while the title was being generated.
- *
- * Pi has no liveness predicate, so the attempt IS the check: on a stale context
- * every session-bound method throws rather than writing. Both the read and the
- * write stay inside this one session-bound step so a replacement cannot slip
- * between them, and the throw is the answer rather than an error worth
- * reporting -- the title simply has nowhere to land.
- */
-function writeSessionName(pi: ExtensionAPI, title: string): boolean {
-  try {
-    if (pi.getSessionName()) return false;
-    pi.setSessionName(title);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Generate and set a session title. Runs asynchronously without blocking
- * the agent_end handler so the UI stays responsive.
+ * Generate and set a session title. Runs asynchronously without blocking the
+ * agent_end handler so the UI stays responsive.
  */
 async function generateTitle(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  onWriting: (title: string) => boolean,
   onSuccess: () => void,
   onFailure: () => void,
+  onFinish: () => void,
 ) {
   try {
     const settings = loadSessionNameConfig();
 
-    // 1. Build conversation text — first user + assistant exchange only
+    // Use the latest complete user + assistant exchange. The first title is
+    // therefore unchanged, while a cadence-based recomputation reflects where
+    // the conversation has drifted since then.
     const branch = ctx.sessionManager.getBranch();
-    const userLines: string[] = [];
-    const assistantLines: string[] = [];
-    let foundUser = false;
-    let foundAssistant = false;
+    let latestUser: string | undefined;
+    let conversationText: string | undefined;
 
     for (const entry of branch) {
       if (entry.type !== "message") continue;
       const msg = entry.message;
       if (msg.role !== "user" && msg.role !== "assistant") continue;
+      const texts = typeof msg.content === "string"
+        ? [msg.content]
+        : Array.isArray(msg.content)
+          ? msg.content
+              .filter((b: any) => b?.type === "text" && typeof b.text === "string")
+              .map((b: any) => b.text)
+          : [];
+      const text = texts.join("\n").trim().slice(0, 500);
+      if (!text) continue;
 
-      const content = msg.content;
-
-      if (msg.role === "user" && !foundUser) {
-        const texts = typeof content === "string"
-          ? [content]
-          : Array.isArray(content)
-            ? content
-                .filter((b: any) => b?.type === "text" && typeof b.text === "string")
-                .map((b: any) => b.text)
-            : [];
-        if (texts.length > 0) {
-          const userText = texts.join("\n").trim().slice(0, 500);
-          userLines.push("User: " + userText);
-          foundUser = true;
-        }
+      if (msg.role === "user") {
+        latestUser = text;
+      } else if (latestUser) {
+        conversationText = `User: ${latestUser}\nAssistant: ${text}`;
       }
-
-      if (msg.role === "assistant" && !foundAssistant && foundUser) {
-        const texts = typeof content === "string"
-          ? [content]
-          : Array.isArray(content)
-            ? content
-                .filter((b: any) => b?.type === "text" && typeof b.text === "string")
-                .map((b: any) => b.text)
-            : [];
-        if (texts.length > 0) {
-          const assistantText = texts.join("\n").trim().slice(0, 500);
-          assistantLines.push("Assistant: " + assistantText);
-          foundAssistant = true;
-        }
-      }
-
-      if (foundUser && foundAssistant) break;
     }
 
-    const conversationText = [...userLines, ...assistantLines].join("\n");
-    if (!conversationText.trim()) return;
+    if (!conversationText) return;
 
-    // 2. Build title prompt
     const titlePrompt = [
       "Generate a concise title (3-8 words) for this conversation.",
       "The title should capture what the user is working on.",
@@ -169,19 +128,13 @@ async function generateTitle(
       "</conversation>",
     ].join("\n");
 
-    // 3. Resolve model
     const settingsModel = resolveModel(settings.model, ctx.modelRegistry.getAll());
     const model = settingsModel ?? ctx.model;
-    if (!model) return;
+    if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) return;
 
-    // 4. Check auth
-    if (!ctx.modelRegistry.hasConfiguredAuth(model)) return;
-
-    // 5. Get API key and headers
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) return;
 
-    // 6. Make API call
     const opts: { reasoning: "minimal"; cacheRetention: "none"; sessionId: string; apiKey?: string; headers?: ProviderHeaders } = {
       reasoning: "minimal",
       cacheRetention: "none",
@@ -191,16 +144,13 @@ async function generateTitle(
     if (auth.headers) opts.headers = auth.headers;
 
     const response = await complete(model, {
-      messages: [
-        {
-          role: "user" as const,
-          content: [{ type: "text" as const, text: titlePrompt }],
-          timestamp: Date.now(),
-        },
-      ],
+      messages: [{
+        role: "user" as const,
+        content: [{ type: "text" as const, text: titlePrompt }],
+        timestamp: Date.now(),
+      }],
     }, opts);
 
-    // 7. Extract and clean title
     const title = response.content
       .filter((c: any): c is { type: "text"; text: string } => c.type === "text")
       .map((c) => c.text)
@@ -215,21 +165,13 @@ async function generateTitle(
       return;
     }
 
-    // 8. Race guard, and the write itself, in one session-bound step.
-    //
-    // This function is detached from its `agent_end` handler on purpose -- the
-    // model call takes seconds, and the UI must not wait for it -- so it can
-    // outlive the session it started in. A newSession/fork/switchSession or
-    // /reload during that window invalidates every session-bound object, and
-    // pi's methods throw afterwards. There is no context to pick up instead:
-    // extension instances are per-session, and `withSession` hands a
-    // replacement context to the code that triggered the replacement, not to a
-    // bystander like this one.
-    if (!writeSessionName(pi, title)) return;
+    if (!onWriting(title)) return;
     onSuccess();
   } catch (e) {
     console.error("[archimedes] session-name failed:", e);
     onFailure();
+  } finally {
+    onFinish();
   }
 }
 
@@ -238,28 +180,65 @@ async function generateTitle(
 export function registerSessionName(pi: ExtensionAPI) {
   let hasNamed = false;
   let failCount = 0;
+  let exchangeCount = 0;
+  let inFlight = false;
+  let extensionName: string | undefined;
+  let hasManualName = false;
 
   pi.on("session_start", () => {
     hasNamed = false;
     failCount = 0;
+    exchangeCount = 0;
+    inFlight = false;
+    extensionName = undefined;
+    hasManualName = false;
   });
 
-  pi.on("agent_end", async (_event, ctx: ExtensionContext) => {
-    // Guard: already named this session
-    if (hasNamed) return;
+  // Pi sends this for both our setSessionName call and --name / /name. Keeping
+  // the last title we wrote lets us distinguish them without another mechanism.
+  pi.on("session_info_changed", (event) => {
+    if (event.name !== extensionName) hasManualName = true;
+  });
 
-    // Guard: too many transient failures — stop trying
-    if (failCount >= 3) return;
+  pi.on("agent_end", (_event, ctx: ExtensionContext) => {
+    exchangeCount++;
+    const interval = recomputeInterval(loadSessionNameConfig().recomputeEvery);
 
-    // Guard: session already named via --name or /name
-    if (pi.getSessionName()) return;
+    if (inFlight || failCount >= 3 || hasManualName) return;
+    if (hasNamed && (interval === 0 || exchangeCount % interval !== 0)) return;
 
-    // Guard: skip ephemeral sessions (no session file)
+    // An existing non-extension title may predate this extension's listener.
+    const currentName = pi.getSessionName();
+    if (currentName && currentName !== extensionName) {
+      hasManualName = true;
+      return;
+    }
     if (!ctx.sessionManager.getSessionFile()) return;
 
-    // Fire-and-forget: spawn title generation in background so handler
-    // returns immediately and the UI becomes responsive.
-    void generateTitle(pi, ctx, () => { hasNamed = true; }, () => { failCount++; });
+    inFlight = true;
+    void generateTitle(
+      pi,
+      ctx,
+      (title) => {
+        if (hasManualName) return false;
+        try {
+          const current = pi.getSessionName();
+          if (current && current !== extensionName) {
+            hasManualName = true;
+            return false;
+          }
+          // Set before Pi emits session_info_changed, which may be synchronous.
+          extensionName = title;
+          pi.setSessionName(title);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      () => { hasNamed = true; },
+      () => { failCount++; },
+      () => { inFlight = false; },
+    );
   });
 }
 
