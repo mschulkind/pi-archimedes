@@ -141,19 +141,67 @@ describe("session naming", () => {
     expect(reported).not.toHaveBeenCalled();
   });
 
-  it("does not start a second title call while one is in flight", async () => {
+  it("defers a tick that lands while a call is in flight instead of losing it", async () => {
     loadConfig.mockReturnValue({ recomputeEvery: 1 });
     let resolveComplete!: (value: unknown) => void;
     complete.mockReturnValue(new Promise((resolve) => { resolveComplete = resolve; }));
-    const { endTurn, names } = harness();
+    const { endTurn } = harness();
 
     await endTurn();
     await endTurn();
+    // The second tick cannot start a call while the first is in flight, but it is
+    // a due cadence tick and must not be dropped: with recomputeEvery: 1 the old
+    // code discarded it for good, so an exchange that ended mid-call went unnamed.
     expect(complete).toHaveBeenCalledTimes(1);
 
     resolveComplete({ content: [{ type: "text", text: "Eventually named" }] });
     await settle();
-    expect(names).toEqual(["Eventually named"]);
+
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an in-flight title when the user renames mid-call", async () => {
+    loadConfig.mockReturnValue({ recomputeEvery: 1 });
+    let resolveComplete!: (value: unknown) => void;
+    complete.mockReturnValue(new Promise((resolve) => { resolveComplete = resolve; }));
+    const naming = harness();
+
+    await naming.endTurn();
+    naming.setManualName("Hand-picked");
+    resolveComplete({ content: [{ type: "text", text: "Too late" }] });
+    await settle();
+
+    expect(naming.names).toEqual([]);
+  });
+
+  it("cannot tell a same-string rename from its own write, so updates continue", async () => {
+    loadConfig.mockReturnValue({ recomputeEvery: 1 });
+    const naming = harness();
+
+    await naming.endTurn();
+    // The event payload is `name` alone, so this is byte-identical to the write
+    // the extension just made. Reading it as manual would disable recompute, so
+    // the documented trade is that a rename to the identical string is lost.
+    naming.setManualName("Fix a stale session ctx");
+    await naming.endTurn();
+
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after three failed recurrences, not just three initial attempts", async () => {
+    loadConfig.mockReturnValue({ recomputeEvery: 1 });
+    const naming = harness();
+
+    await naming.endTurn();
+    complete.mockRejectedValue(new Error("provider failed"));
+    await naming.endTurn();
+    await naming.endTurn();
+    await naming.endTurn();
+    await naming.endTurn();
+
+    // One success, then exactly three failures before the budget closes.
+    expect(complete).toHaveBeenCalledTimes(4);
+    expect(reported).toHaveBeenCalledTimes(3);
   });
 
   it("gives up after three failed title attempts", async () => {

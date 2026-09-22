@@ -1,6 +1,11 @@
 packages:
   - "packages/*"
   - "meta"
+# pnpm 12 refuses to install until every build script it finds is answered.
+# The committed file carried the SCAFFOLD TEXT ("set this to true or false") as
+# the value for all three, so `pnpm install` -- and therefore the whole test
+# suite -- failed with ERR_PNPM_IGNORED_BUILDS on a clean checkout.
 allowBuilds:
-  '@google/genai': set this to true or false
-  protobufjs: set this to true or false
+  '@google/genai': true
+  esbuild: true
+  protobufjs: true

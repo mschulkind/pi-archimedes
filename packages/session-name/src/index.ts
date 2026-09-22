@@ -184,6 +184,14 @@ export function registerSessionName(pi: ExtensionAPI) {
   let inFlight = false;
   let extensionName: string | undefined;
   let hasManualName = false;
+  // True only while our own setSessionName call is on the stack, which is how a
+  // name change is attributed: see the session_info_changed handler.
+  let writingOwnName = false;
+  // A cadence tick that arrives while a title call is in flight. Deferring it
+  // rather than dropping it is what makes "every Nth exchange" true even when an
+  // exchange ends while the previous title is still being generated.
+  let pendingRecompute = false;
+  let latestCtx: ExtensionContext | undefined;
 
   pi.on("session_start", () => {
     hasNamed = false;
@@ -192,20 +200,34 @@ export function registerSessionName(pi: ExtensionAPI) {
     inFlight = false;
     extensionName = undefined;
     hasManualName = false;
+    writingOwnName = false;
+    pendingRecompute = false;
+    latestCtx = undefined;
   });
 
-  // Pi sends this for both our setSessionName call and --name / /name. Keeping
-  // the last title we wrote lets us distinguish them without another mechanism.
+  // Pi sends this for both our setSessionName call and --name / /name, and the
+  // event carries no author field — `name` is the whole payload. So a change
+  // whose string differs from the one we last wrote is the user's, and a string
+  // that MATCHES ours is ambiguous: a same-string rename and our own write are
+  // byte-identical events. Outside the write window we leave it alone, which
+  // keeps recompute working at the cost of a rename to the identical string not
+  // registering. Inside the window it is unambiguously ours.
   pi.on("session_info_changed", (event) => {
+    if (writingOwnName) return;
     if (event.name !== extensionName) hasManualName = true;
   });
 
-  pi.on("agent_end", (_event, ctx: ExtensionContext) => {
-    exchangeCount++;
+  const startIfDue = (ctx: ExtensionContext): void => {
+    if (failCount >= 3 || hasManualName) return;
     const interval = recomputeInterval(loadSessionNameConfig().recomputeEvery);
-
-    if (inFlight || failCount >= 3 || hasManualName) return;
+    // One-shot mode has nothing to do once the first title has landed.
     if (hasNamed && (interval === 0 || exchangeCount % interval !== 0)) return;
+    if (inFlight) {
+      // Due, but the previous call has not returned: remember it so the cadence
+      // is honoured late rather than skipped forever.
+      pendingRecompute = true;
+      return;
+    }
 
     // An existing non-extension title may predate this extension's listener.
     const currentName = pi.getSessionName();
@@ -227,9 +249,15 @@ export function registerSessionName(pi: ExtensionAPI) {
             hasManualName = true;
             return false;
           }
-          // Set before Pi emits session_info_changed, which may be synchronous.
+          // Set before Pi emits session_info_changed, which may be synchronous:
+          // the flag is what makes that event read as ours.
           extensionName = title;
-          pi.setSessionName(title);
+          writingOwnName = true;
+          try {
+            pi.setSessionName(title);
+          } finally {
+            writingOwnName = false;
+          }
           return true;
         } catch {
           return false;
@@ -237,8 +265,19 @@ export function registerSessionName(pi: ExtensionAPI) {
       },
       () => { hasNamed = true; },
       () => { failCount++; },
-      () => { inFlight = false; },
+      () => {
+        inFlight = false;
+        if (!pendingRecompute) return;
+        pendingRecompute = false;
+        if (latestCtx) startIfDue(latestCtx);
+      },
     );
+  };
+
+  pi.on("agent_end", (_event, ctx: ExtensionContext) => {
+    latestCtx = ctx;
+    exchangeCount++;
+    startIfDue(ctx);
   });
 }
 

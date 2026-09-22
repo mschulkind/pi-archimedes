@@ -8,6 +8,10 @@
   "dependencies": {
     "@pi-archimedes/core": "2.8.0"
   },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^3.0.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.1.0",
     "@earendil-works/pi-ai": ">=0.1.0",
