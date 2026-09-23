@@ -10,13 +10,16 @@ export interface SessionNameSettings {
   // suite-managed by meta's plugin gate (archimedes.sessionName.enabled — see ADR 0012); session-name never reads this
   enabled?: boolean | undefined;
   model?: string | undefined;
-  /** Recompute an extension-owned title every N completed exchanges; 0 is one-shot. */
+  /** Recompute an extension-owned title after N further completed exchanges; 0 is one-shot. */
   recomputeEvery?: number | undefined;
+  /** Minimum minutes between title requests, including failed requests; 0 disables the floor. */
+  minRecomputeMinutes?: number | undefined;
 }
 
 const DEFAULT_SESSION_NAME_CONFIG: SessionNameSettings = {
   model: undefined,
   recomputeEvery: 0,
+  minRecomputeMinutes: 0,
 };
 
 const NAMESPACE = "archimedes.sessionName";
@@ -26,7 +29,11 @@ export function loadSessionNameConfig(): SessionNameSettings {
 }
 
 function recomputeInterval(value: number | undefined): number {
-  return value !== undefined && Number.isInteger(value) && value > 0 ? value : 0;
+  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function minimumIntervalMs(value: number | undefined): number {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value * 60_000 : 0;
 }
 
 // ── Model resolution ────────────────────────────────────────────────────────
@@ -81,6 +88,7 @@ async function generateTitle(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   onWriting: (title: string) => boolean,
+  onCallStart: () => void,
   onSuccess: () => void,
   onFailure: () => void,
   onFinish: () => void,
@@ -143,6 +151,10 @@ async function generateTitle(
     if (auth.apiKey) opts.apiKey = auth.apiKey;
     if (auth.headers) opts.headers = auth.headers;
 
+    // Start the time floor only when a request really goes out. A missing
+    // credential or conversation must not strand a newly authenticated user
+    // without a title for an hour.
+    onCallStart();
     const response = await complete(model, {
       messages: [{
         role: "user" as const,
@@ -181,6 +193,8 @@ export function registerSessionName(pi: ExtensionAPI) {
   let hasNamed = false;
   let failCount = 0;
   let exchangeCount = 0;
+  let lastAttemptExchange = 0;
+  let lastAttemptAt: number | undefined;
   let inFlight = false;
   let extensionName: string | undefined;
   let hasManualName = false;
@@ -197,6 +211,8 @@ export function registerSessionName(pi: ExtensionAPI) {
     hasNamed = false;
     failCount = 0;
     exchangeCount = 0;
+    lastAttemptExchange = 0;
+    lastAttemptAt = undefined;
     inFlight = false;
     extensionName = undefined;
     hasManualName = false;
@@ -219,9 +235,15 @@ export function registerSessionName(pi: ExtensionAPI) {
 
   const startIfDue = (ctx: ExtensionContext): void => {
     if (failCount >= 3 || hasManualName) return;
-    const interval = recomputeInterval(loadSessionNameConfig().recomputeEvery);
-    // One-shot mode has nothing to do once the first title has landed.
-    if (hasNamed && (interval === 0 || exchangeCount % interval !== 0)) return;
+    const settings = loadSessionNameConfig();
+    const interval = recomputeInterval(settings.recomputeEvery);
+    // Both thresholds must be met on an exchange boundary. If the fifth
+    // exchange comes before the hour, try again on the NEXT exchange after it;
+    // do not schedule a paid call in the background while the user is idle.
+    if (hasNamed && (interval === 0 || exchangeCount - lastAttemptExchange < interval)) return;
+    const now = Date.now();
+    const minimumMs = minimumIntervalMs(settings.minRecomputeMinutes);
+    if (lastAttemptAt !== undefined && now - lastAttemptAt < minimumMs) return;
     if (inFlight) {
       // Due, but the previous call has not returned: remember it so the cadence
       // is honoured late rather than skipped forever.
@@ -237,6 +259,7 @@ export function registerSessionName(pi: ExtensionAPI) {
     }
     if (!ctx.sessionManager.getSessionFile()) return;
 
+    const startedAtExchange = exchangeCount;
     inFlight = true;
     void generateTitle(
       pi,
@@ -262,6 +285,10 @@ export function registerSessionName(pi: ExtensionAPI) {
         } catch {
           return false;
         }
+      },
+      () => {
+        lastAttemptAt = Date.now();
+        lastAttemptExchange = startedAtExchange;
       },
       () => { hasNamed = true; },
       () => { failCount++; },

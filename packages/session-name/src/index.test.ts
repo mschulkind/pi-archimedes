@@ -15,7 +15,7 @@ type Handler = (event: any, ctx?: ExtensionContext) => unknown;
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function harness(existingName?: string) {
+function harness(existingName?: string, hasAuth: () => boolean = () => true) {
   const names: string[] = [];
   let existing = existingName;
   let stale = false;
@@ -49,7 +49,7 @@ function harness(existingName?: string) {
     model: { provider: "test", id: "test-model" },
     modelRegistry: {
       getAll: () => [{ provider: "test", id: "test-model" }],
-      hasConfiguredAuth: () => true,
+      hasConfiguredAuth: hasAuth,
       getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }),
     },
   } as unknown as ExtensionContext;
@@ -80,7 +80,10 @@ describe("session naming", () => {
     reported = vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  afterEach(() => reported.mockRestore());
+  afterEach(() => {
+    reported.mockRestore();
+    vi.restoreAllMocks();
+  });
 
   it("keeps the default recomputeEvery: 0 one-shot", async () => {
     const { names, endTurn } = harness();
@@ -102,10 +105,11 @@ describe("session naming", () => {
     expect(reported).not.toHaveBeenCalled();
   });
 
-  it("recomputes on the configured Nth completed exchange and not before", async () => {
+  it("recomputes after N further completed exchanges, not N total", async () => {
     loadConfig.mockReturnValue({ recomputeEvery: 3 });
     const { names, endTurn } = harness();
 
+    await endTurn();
     await endTurn();
     await endTurn();
     expect(complete).toHaveBeenCalledTimes(1);
@@ -113,6 +117,56 @@ describe("session naming", () => {
 
     expect(names).toEqual(["Fix a stale session ctx", "Fix a stale session ctx"]);
     expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for both five exchanges and one hour, retrying on the next exchange after the hour", async () => {
+    loadConfig.mockReturnValue({ recomputeEvery: 5, minRecomputeMinutes: 60 });
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const { endTurn } = harness();
+
+    await endTurn(); // first title, immediately
+    expect(complete).toHaveBeenCalledTimes(1);
+    now += 3_600_000 - 1;
+    for (let i = 0; i < 5; i++) await endTurn();
+    expect(complete).toHaveBeenCalledTimes(1); // five exchanges, but not an hour
+    now++;
+    await endTurn(); // next exchange, now both limits met
+    expect(complete).toHaveBeenCalledTimes(2);
+
+    now += 3_600_000;
+    for (let i = 0; i < 4; i++) await endTurn();
+    expect(complete).toHaveBeenCalledTimes(2); // an hour, but only four exchanges
+    await endTurn();
+    expect(complete).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a failed title call within the hourly floor", async () => {
+    loadConfig.mockReturnValue({ recomputeEvery: 5, minRecomputeMinutes: 60 });
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    complete.mockRejectedValueOnce(new Error("temporary failure"));
+    const { endTurn } = harness();
+
+    await endTurn();
+    now += 3_600_000 - 1;
+    await endTurn();
+    expect(complete).toHaveBeenCalledTimes(1);
+    now++;
+    await endTurn();
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not start the hour clock if auth was missing and no request was sent", async () => {
+    loadConfig.mockReturnValue({ recomputeEvery: 5, minRecomputeMinutes: 60 });
+    let authorized = false;
+    const { endTurn } = harness(undefined, () => authorized);
+
+    await endTurn();
+    expect(complete).toHaveBeenCalledTimes(0);
+    authorized = true;
+    await endTurn();
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
   it("never replaces a manual name at any cadence", async () => {
