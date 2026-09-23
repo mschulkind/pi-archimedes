@@ -31,7 +31,7 @@ After installing Pi, choose one installation command above, then `cd` into your 
 - **Session line** — working directory, active git branch with clean/dirty indicator, worktree badge, active model, and thinking level.
 - **Token ledger** — input (↑) and output (↓) tokens, cache read/write, and the live accumulated dollar cost of the session.
 - **Context bar** — colour-coded (green → yellow → red). It shows **consumption**: how much of the context window is used, not how much headroom is left.
-- **Adaptive layout** — one compact line on wide viewports; it wraps to the lines it needs as the terminal narrows instead of truncating essential data.
+- **Adaptive layout** — one compact line on wide viewports; it wraps to the lines it needs as the terminal narrows instead of truncating essential data. Sections use `│` separators, distinct from the `·` separators *inside* an extension status such as `OR 6h`, so the routing summary does not run into adjacent figures.
 - **Subagent aggregation** — in the suite, subagent token and cost events flow over core's bus into the same accumulator, so worker spend and main-session spend read as one total.
 
 Two honest caveats: the ledger reflects usage and pricing **as reported to the session** — it's a live read of what Pi has accounted, not a guaranteed provider invoice, and not a tally of every background model call. And the context bar tracks consumption, not remaining headroom.

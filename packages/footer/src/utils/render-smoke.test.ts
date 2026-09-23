@@ -41,6 +41,15 @@ function buildLines(width: number, pct: number, splitThreshold = 150, extraSecti
 }
 
 describe("render glue simulation", () => {
+  it("separates the OR status from adjacent footer sections more strongly than its internal metrics", () => {
+    const orStatus = "OR 6h: Tog 2 · DI 1 · swaps 3 · cache 68%";
+    const lines = buildLines(300, 12, 150, [orStatus, "    58 tok/s"]);
+    const joined = stripAnsi(lines.join(" "));
+    expect(SEPARATOR).toBe(" │ ");
+    expect(joined).toContain(`${SEPARATOR}${orStatus}${SEPARATOR}`);
+    expect(joined).toContain(`${orStatus}${SEPARATOR}    58 tok/s`);
+  });
+
   it("wide terminal (width 200): single line, nothing clipped, bar exactly fills", () => {
     const lines = buildLines(200, 12);
     expect(lines.length).toBe(1);

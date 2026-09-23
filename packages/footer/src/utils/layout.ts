@@ -16,10 +16,10 @@ import { visibleWidth } from "@earendil-works/pi-tui";
  * for clamping it (last-resort truncation of one irreducibly long item).
  */
 
-/** Visible width of the " · " footer separator. */
+/** Visible width of the " │ " footer section separator. */
 export const SEP_W = 3;
 /** The footer section separator string (without ANSI colouring — colour it at the call site). */
-export const SEPARATOR = " · ";
+export const SEPARATOR = " │ ";
 
 /**
  * Total visible columns of chunks joined by a separator of `sepWidth`
@@ -40,7 +40,7 @@ function measureChunks(chunks: string[], sepWidth = 3): number {
  *
  * @param chunks atomic footer pieces, in desired display order
  * @param width  terminal width in visible columns
- * @param sepWidth visible width of the join separator (default 3, for " · ")
+ * @param sepWidth visible width of the join separator (default 3, for " │ ")
  */
 export function packFooterLines(chunks: string[], width: number, sepWidth = 3): string[][] {
   if (chunks.length === 0) return [];
