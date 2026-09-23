@@ -14,10 +14,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { clampLine } from "@pi-archimedes/core/text";
 import { loadFooterConfig } from "./config.js";
-import { formatModelLabel } from "./model-label.js";
+import { formatModelLabel, formatSessionLabel } from "./model-label.js";
 import { CostAccumulator } from "./cost-accumulator.js";
 import { getGitStatus, isInsideLinkedWorktree } from "./utils/git.js";
-import { getContextWindowInfo, getTokenUsageStats, type TokenUsageStats } from "./utils/stats.js";
+import { getContextWindowInfo, getTokenUsageStats, latestCacheHitRate, type TokenUsageStats } from "./utils/stats.js";
 import { formatContextBar, formatGitStatusIndicators, formatThinkingIndicator, formatTokenCount, wrapStatusToChunks } from "./utils/format.js";
 import { footerIcons } from "./utils/icons.js";
 import { packFooterLines, SEP_W, SEPARATOR } from "./utils/layout.js";
@@ -52,6 +52,7 @@ export function registerFooter(pi: ExtensionAPI): void {
           try {
             const colorize = (token: string, s: string) => theme.fg(token as any, s);
             const activeModel = formatModelLabel(ctx.model);
+            const sessionName = formatSessionLabel(ctx.sessionManager.getSessionName());
             const currentBranch = footerData.getGitBranch();
             const currentDirectory = process.cwd().split("/").pop() || process.cwd();
             const gitStatus = getGitStatus();
@@ -88,6 +89,7 @@ export function registerFooter(pi: ExtensionAPI): void {
             const leftSections = [
               colorize("syntaxFunction", " " + footerIcons.directory + currentDirectory),
               currentBranch ? colorize("success", branchIcon + " " + currentBranch + (gitStatusStr ? " " + gitStatusStr : "")) : "",
+              sessionName ? colorize("dim", sessionName) : "",
               colorize("syntaxType", footerIcons.model + " " + activeModel),
               thinkingIndicatorStr,
               ...extensionStatusChunks,
@@ -99,6 +101,8 @@ export function registerFooter(pi: ExtensionAPI): void {
             if (totalOutput) statsParts.push("↓" + formatTokenCount(totalOutput));
             if (totalCacheRead) statsParts.push("R" + formatTokenCount(totalCacheRead));
             if (totalCacheWrite) statsParts.push("W" + formatTokenCount(totalCacheWrite));
+            const cacheHitRate = latestCacheHitRate(ctx.sessionManager.getEntries());
+            if (cacheHitRate !== undefined) statsParts.push("CH" + cacheHitRate.toFixed(1) + "%");
             if (totalCost) statsParts.push("$" + totalCost.toFixed(2));
 
             const contextUsed = contextWindowSize * (contextPercentValue / 100);

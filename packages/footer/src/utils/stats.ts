@@ -100,6 +100,25 @@ export function getTokenUsageStats(ctx: ExtensionContext): TokenUsageStats {
   return result;
 }
 
+/** Cache hit rate of the latest assistant prompt, not cumulative session usage. */
+export function latestCacheHitRate(entries: readonly unknown[]): number | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i] as { type?: unknown; message?: { role?: unknown; usage?: Partial<MessageUsage> } } | undefined;
+    if (entry?.type !== "message" || entry.message?.role !== "assistant") continue;
+    const usage = entry.message.usage;
+    if (!usage) return undefined;
+    const input = usage.input;
+    const read = usage.cacheRead;
+    const write = usage.cacheWrite;
+    if (![input, read, write].every((value) => typeof value === "number" && Number.isFinite(value) && value >= 0)) {
+      return undefined;
+    }
+    const total = input! + read! + write!;
+    return total > 0 ? (read! / total) * 100 : undefined;
+  }
+  return undefined;
+}
+
 /** Clear the stats cache — call when a new message arrives. */
 export function invalidateStatsCache(): void {
   statsCache = undefined;

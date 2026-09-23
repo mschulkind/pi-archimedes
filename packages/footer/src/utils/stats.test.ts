@@ -227,3 +227,19 @@ describe("getContextWindowInfo", () => {
     expect(result.windowSize).toBe(10000);
   });
 });
+
+describe("latest prompt cache hit", () => {
+  it("uses the latest assistant prompt rather than cumulative cache usage", async () => {
+    const { latestCacheHitRate } = await import("./stats.js");
+    const older = makeAssistantEntry({ input: 100, output: 5, cacheRead: 900, cacheWrite: 0, cost: { total: 0 } });
+    const latest = makeAssistantEntry({ input: 750, output: 5, cacheRead: 250, cacheWrite: 0, cost: { total: 0 } });
+    expect(latestCacheHitRate([older, latest, makeUserEntry()])).toBe(25);
+  });
+
+  it("does not show an invented percentage without reported prompt tokens", async () => {
+    const { latestCacheHitRate } = await import("./stats.js");
+    expect(latestCacheHitRate([])).toBeUndefined();
+    expect(latestCacheHitRate([makeAssistantEntry({ input: 0, output: 3, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } })]))
+      .toBeUndefined();
+  });
+});
