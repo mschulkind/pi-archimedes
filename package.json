@@ -18,6 +18,6 @@
     "@earendil-works/pi-tui": ">=0.1.0"
   },
   "pi": {
-    "extensions": ["./packages/session-name/src/index.ts"]
+    "extensions": ["./packages/session-name/src/index.ts", "./packages/footer/src/index.ts"]
   }
 }
