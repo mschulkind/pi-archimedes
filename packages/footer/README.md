@@ -2,7 +2,7 @@
 
 **Session details without scrolling.**
 
-A long session drags context out of reach fast. The footer keeps the essentials pinned to the bottom of the terminal — where you are, which model you're running, how deep you are into the context window, and what you've spent — laying them out without clipping on any viewport width. When subagents run, their tokens and costs land in the same view, so the number you're watching is the whole run.
+A long session drags context out of reach fast. The footer keeps the essentials pinned to the bottom of the terminal — where you are, which Pi provider and model you're running (for example, `openai-codex/gpt-6-sol`), how deep you are into the context window, and what you've spent — laying them out without clipping on any viewport width. The provider is Pi's active route, which yolo selects through its profile; for OpenRouter it is `openrouter`, not the upstream service chosen for an individual request. When subagents run, their tokens and costs land in the same view, so the number you're watching is the whole run.
 
 ## Install
 
