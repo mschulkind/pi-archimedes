@@ -12,7 +12,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { clampLine } from "@pi-archimedes/core/text";
+import { clampLine, stripAnsi } from "@pi-archimedes/core/text";
 import { loadFooterConfig } from "./config.js";
 import { formatModelLabel, formatSessionLabel } from "./model-label.js";
 import { CostAccumulator } from "./cost-accumulator.js";
@@ -83,6 +83,10 @@ export function registerFooter(pi: ExtensionAPI): void {
             // Extension status texts (pi setStatus) — may contain ANSI; oversized statuses wrap
             const extensionStatusChunks = [...footerData.getExtensionStatuses().values()]
               .filter(Boolean)
+              .map((s) => {
+                const mcp = stripAnsi(s).trim().match(/^(?:🔌\s*)?MCP:\s*(\d+)\s+servers?\s+enabled$/u);
+                return mcp ? colorize("dim", `MCP ${mcp[1]}`) : s;
+              })
               .flatMap((s) => wrapStatusToChunks(s, width));
 
             // System info sections: dir | branch [+status] | model | thinking | ext-statuses
@@ -125,7 +129,7 @@ export function registerFooter(pi: ExtensionAPI): void {
             // next line. Below the splitThreshold setting, force at least the
             // two-line split (system info above, stats below) even when one
             // line would fit. The context bar expands into the remainder of
-            // the last line and is dropped only if no reasonable space is left.
+            // the last line (up to 30 columns) and is dropped if no reasonable space is left.
             const separator = theme.fg("dim", SEPARATOR);
             let groups = packFooterLines([...leftSections, statsSectionStr], width, SEP_W);
             if (groups.length < 2 && width < splitThreshold && leftSections.length > 0) {

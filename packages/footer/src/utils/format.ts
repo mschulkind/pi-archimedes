@@ -14,15 +14,15 @@ export function formatTokenCount(count: number): string {
 }
 
 /**
- * Context progress bar, sized to occupy EXACTLY `totalSpace` visible columns
- * (icon + gaps + bar + percentage label). Returns "" when there isn't room
- * for the icon, label and at least one bar segment.
+ * Context progress bar, capped at 30 visible columns so spare terminal width
+ * does not turn the bar into a full-line ruler. Returns "" when there isn't
+ * room for the icon, label and at least one bar segment.
  */
 export function formatContextBar(colorize: ColorFn, percentValue: number, totalSpace: number): string {
   const pct = Math.min(1, Math.max(0, percentValue / 100));
   const pctLabel = Math.round(Math.max(0, percentValue)) + "%";
   // Fixed overhead: icon (1) + "  " (2) + " " (1) + percentage label
-  const barLength = totalSpace - 4 - pctLabel.length;
+  const barLength = Math.min(totalSpace, 30) - 4 - pctLabel.length;
   if (barLength < 1) return "";
 
   const filledLength = percentValue > 0 ? Math.max(1, Math.round(pct * barLength)) : 0;

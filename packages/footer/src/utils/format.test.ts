@@ -80,10 +80,10 @@ describe("formatContextBar", () => {
     expect(result).toContain("75%");
   });
 
-  it("occupies exactly totalSpace visible columns", () => {
+  it("caps the bar instead of stretching across spare terminal width", () => {
     expect(visibleWidth(formatContextBar(mockColor, 50, 24))).toBe(24);
     expect(visibleWidth(formatContextBar(mockColor, 100, 30))).toBe(30);
-    expect(visibleWidth(formatContextBar(mockColor, 0, 16))).toBe(16);
+    expect(visibleWidth(formatContextBar(mockColor, 0, 160))).toBe(30);
   });
 
   it("returns empty when the fixed overhead alone would not fit", () => {
