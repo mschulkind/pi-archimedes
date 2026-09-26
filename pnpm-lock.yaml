@@ -86,6 +86,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: ^0.85.1
         version: 0.85.1
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
       typebox:
         specifier: ^1.1.38
         version: 1.1.38
@@ -101,6 +104,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: ^0.85.1
         version: 0.85.1
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
@@ -129,6 +135,9 @@ importers:
       '@types/diff':
         specifier: ^7.0.2
         version: 7.0.2
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
@@ -255,6 +264,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.19
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
       typebox:
         specifier: ^1.1.38
         version: 1.1.38
@@ -296,6 +308,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: ^0.85.1
         version: 0.85.1
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
       typescript:
         specifier: ^6.0.0
         version: 6.0.3

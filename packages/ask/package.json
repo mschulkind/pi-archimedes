@@ -25,6 +25,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@earendil-works/pi-tui": "^0.85.1",
+    "fast-check": "4.9.0",
     "typebox": "^1.1.38",
     "typescript": "^6.0.0"
   },
